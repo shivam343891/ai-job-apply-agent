@@ -58,7 +58,14 @@ class AnalyzeJDRequest(BaseModel):
 
 
 def _read(path: str) -> str:
-    return Path(path).read_text(encoding="utf-8", errors="ignore")
+    p = Path(path)
+    if not path or not p.is_file():
+        raise ValueError(f"Resume file not found: '{path}'. Set resumePath in your config.")
+    if p.suffix.lower() == ".pdf":
+        from pypdf import PdfReader
+        reader = PdfReader(str(p))
+        return "\n".join(page.extract_text() or "" for page in reader.pages)
+    return p.read_text(encoding="utf-8", errors="ignore")
 
 
 def _keywords(text: str, top_n: int = 60) -> list[str]:

@@ -77,8 +77,8 @@ LinkedIn Easy Apply requires you to be logged in. The agent reads your Chrome co
 uvicorn job_agent.main:app --reload
 ```
 
-Server runs at `http://localhost:8000`
-Docs at `http://localhost:8000/docs`
+Server runs at `http://localhost:8000` — open this in your browser for the full UI.
+API docs at `http://localhost:8000/docs`
 
 ---
 

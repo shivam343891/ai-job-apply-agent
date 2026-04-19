@@ -42,7 +42,7 @@
   <!-- Search form -->
   <div class="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-6">
     <h2 class="text-base font-semibold mb-4 text-gray-200">Search Jobs</h2>
-    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
       <div>
         <label class="text-xs text-gray-400 mb-1 block">Search term</label>
         <input id="s-term" type="text" value="Backend Engineer Python"
@@ -60,8 +60,21 @@
       </div>
       <div>
         <label class="text-xs text-gray-400 mb-1 block">Sites</label>
-        <input id="s-sites" type="text" value="linkedin,indeed,glassdoor,zip_recruiter"
+        <input id="s-sites" type="text" value="linkedin,indeed,zip_recruiter"
           class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-indigo-500" />
+      </div>
+    </div>
+    <!-- Regions checklist -->
+    <div class="mb-4">
+      <div class="flex items-center justify-between mb-1.5">
+        <label class="text-xs text-gray-400">Regions</label>
+        <div class="flex gap-3 text-xs text-indigo-400">
+          <button type="button" onclick="toggleAllRegions(true)">all</button>
+          <button type="button" onclick="toggleAllRegions(false)">none</button>
+        </div>
+      </div>
+      <div id="regions-list" class="flex flex-wrap gap-2 min-h-[28px]">
+        <span class="text-xs text-gray-600 animate-pulse">Loading regions…</span>
       </div>
     </div>
     <button onclick="startSearch()"
@@ -171,6 +184,7 @@ function showTab(name) {
   if (name === 'tracker') loadTracker();
 }
 showTab('search');
+loadRegions();
 
 // ── Toast ──────────────────────────────────────────────────────────────
 function toast(msg, err=false) {
@@ -200,18 +214,45 @@ async function pollJob(jobId, onProgress, onDone, onError) {
 // ── Search & Apply ─────────────────────────────────────────────────────
 let _pendingApply = null;
 
+async function loadRegions() {
+  try {
+    const r = await fetch('/jobs/regions');
+    const d = await r.json();
+    const box = document.getElementById('regions-list');
+    box.innerHTML = d.regions.map(region => `
+      <label class="flex items-center gap-1.5 cursor-pointer select-none
+        bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded px-2.5 py-1 text-xs transition">
+        <input type="checkbox" class="region-cb accent-indigo-500" value="${esc(region)}" checked />
+        ${esc(region)}
+      </label>`).join('');
+  } catch(e) {
+    document.getElementById('regions-list').innerHTML =
+      '<span class="text-xs text-red-400">Failed to load regions</span>';
+  }
+}
+
+function toggleAllRegions(checked) {
+  document.querySelectorAll('.region-cb').forEach(cb => cb.checked = checked);
+}
+
+function selectedRegions() {
+  return [...document.querySelectorAll('.region-cb:checked')].map(cb => cb.value);
+}
+
 async function startSearch() {
-  const term  = document.getElementById('s-term').value.trim();
-  const count = parseInt(document.getElementById('s-count').value) || 10;
-  const hours = parseInt(document.getElementById('s-hours').value) || 72;
-  const sites = document.getElementById('s-sites').value.split(',').map(s=>s.trim()).filter(Boolean);
+  const term    = document.getElementById('s-term').value.trim();
+  const count   = parseInt(document.getElementById('s-count').value) || 10;
+  const hours   = parseInt(document.getElementById('s-hours').value) || 72;
+  const sites   = document.getElementById('s-sites').value.split(',').map(s=>s.trim()).filter(Boolean);
+  const regions = selectedRegions();
 
   if (!term) { toast('Enter a search term', true); return; }
+  if (!regions.length) { toast('Select at least one region', true); return; }
 
   document.getElementById('results-list').innerHTML = '';
   const prog = document.getElementById('search-progress');
   prog.classList.remove('hidden');
-  setProgress(0, 'Starting search across 6 regions…');
+  setProgress(0, `Starting search across ${regions.length} region${regions.length > 1 ? 's' : ''}…`);
 
   const res = await fetch('/jobs/search', {
     method: 'POST',
@@ -221,6 +262,7 @@ async function startSearch() {
       results_per_region: count,
       hours_old: hours,
       site_names: sites,
+      regions,
       preferences_path: CFG.preferencesPath,
     })
   });
@@ -229,7 +271,7 @@ async function startSearch() {
   pollJob(job_id,
     (pct, status) => setProgress(pct, status === 'running' ? 'Scraping…' : status),
     (result) => {
-      setProgress(100, `Found ${result.count} jobs`);
+      setProgress(100, `Found ${result.count} jobs across ${result.regions_scraped} region${result.regions_scraped !== 1 ? 's' : ''}`);
       renderJobs(result.jobs || []);
     },
     (err) => { toast('Search failed: ' + err, true); prog.classList.add('hidden'); }
@@ -338,6 +380,12 @@ async function analyzeJob(i) {
   const box  = document.getElementById(`analysis-${i}`);
   const desc = job.description || job.title || '';
   box.classList.remove('hidden');
+
+  if (!CFG.resumePath) {
+    box.innerHTML = '<p class="text-xs text-yellow-400">⚠️ No resume path configured. Set <code>resumePath</code> in my_config.json and restart the server.</p>';
+    return;
+  }
+
   box.innerHTML = '<p class="text-xs text-gray-500 animate-pulse">Analyzing…</p>';
 
   try {

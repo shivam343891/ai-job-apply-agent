@@ -1,4 +1,6 @@
+import asyncio
 import os
+import sys
 from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
@@ -6,6 +8,10 @@ from fastapi.templating import Jinja2Templates
 from job_agent.routers import discovery, ai_skills, email, tracker
 from job_agent.routers.apply import linkedin, lever, greenhouse, jobvite, ashby
 from job_agent.jobs import router as jobs_router
+
+# Playwright needs ProactorEventLoop on Windows to spawn subprocesses
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 app = FastAPI(title="AI Job Apply Agent", version="1.0.0")
 

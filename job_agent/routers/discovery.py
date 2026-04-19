@@ -48,6 +48,7 @@ class SearchRequest(BaseModel):
     hours_old: int = 72
     site_names: list[str] = ["linkedin", "indeed", "glassdoor", "zip_recruiter"]
     preferences_path: str = ""      # if set, each job gets a fit score
+    regions: list[str] = []         # location names to include; empty = all regions
 
 
 class ScoreRequest(BaseModel):
@@ -112,6 +113,12 @@ async def _scrape_region(search_term: str, hours_old: int, site_names: list, res
 async def _scrape(job_id: str, req: SearchRequest):
     prefs = load_preferences(req.preferences_path) if req.preferences_path else None
 
+    # Filter to requested regions (empty list = all)
+    active_regions = (
+        [r for r in _REGIONS if r["location"] in req.regions]
+        if req.regions else _REGIONS
+    ) or _REGIONS  # fallback to all if none matched
+
     # Scrape all regions concurrently
     job_store.update_job(job_id, status="running", progress=5)
     tasks = [
@@ -119,7 +126,7 @@ async def _scrape(job_id: str, req: SearchRequest):
             req.search_term, req.hours_old, req.site_names,
             req.results_per_region, region
         )
-        for region in _REGIONS
+        for region in active_regions
     ]
     results_per_region = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -144,7 +151,7 @@ async def _scrape(job_id: str, req: SearchRequest):
     merged.sort(key=lambda j: order.get(j.get("fit", {}).get("rating", ""), 2))
 
     job_store.update_job(job_id, progress=100)
-    return {"count": len(merged), "regions_scraped": len(_REGIONS), "jobs": merged}
+    return {"count": len(merged), "regions_scraped": len(active_regions), "jobs": merged}
 
 
 async def _scrape_careers(job_id: str, req: CareersRequest):
@@ -180,6 +187,11 @@ async def _scrape_careers(job_id: str, req: CareersRequest):
         jobs_out.append(entry)
 
     return {"count": len(jobs_out), "jobs": jobs_out, "source": req.careers_url}
+
+
+@router.get("/regions")
+async def list_regions():
+    return {"regions": [r["location"] for r in _REGIONS]}
 
 
 @router.post("/search")
