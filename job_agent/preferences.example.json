@@ -1,0 +1,38 @@
+{
+  "dealbreakers": [
+    "unpaid",
+    "internship only",
+    "requires active US citizenship",
+    "requires security clearance",
+    "US citizen only",
+    "green card required"
+  ],
+  "must_haves": [
+    "Python",
+    "full-time",
+    "backend",
+    "software engineer"
+  ],
+  "nice_to_haves": [
+    "FastAPI",
+    "AWS",
+    "Kubernetes",
+    "remote",
+    "EKS",
+    "distributed systems",
+    "MongoDB",
+    "visa sponsorship",
+    "cloud",
+    "API",
+    "India",
+    "Bengaluru",
+    "Hyderabad",
+    "Delhi",
+    "Mumbai",
+    "Europe",
+    "Germany",
+    "Netherlands",
+    "UK",
+    "competitive salary"
+  ]
+}

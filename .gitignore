@@ -138,6 +138,13 @@ celerybeat.pid
 .env
 .envrc
 .venv
+
+# Personal config (contains PII — never commit)
+job_agent/config.json
+job_agent/config/answer_bank.md
+job_agent/preferences.json
+*.csv
+token.pkl
 env/
 venv/
 ENV/
