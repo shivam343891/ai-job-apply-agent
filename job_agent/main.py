@@ -1,9 +1,46 @@
-from fastapi import FastAPI
+import os
+from pathlib import Path
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
 from job_agent.routers import discovery, ai_skills, email, tracker
 from job_agent.routers.apply import linkedin, lever, greenhouse, jobvite, ashby
 from job_agent.jobs import router as jobs_router
 
 app = FastAPI(title="AI Job Apply Agent", version="1.0.0")
+
+_TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+
+# Config path is read from env var so the server knows which config to pre-fill in the UI
+_CONFIG_PATH = os.environ.get("JOB_AGENT_CONFIG", "F:/Custom_Projects/ai-job-apply-agent/my_config.json")
+
+
+@app.get("/", response_class=HTMLResponse)
+async def ui(request: Request):
+    cfg_path = _CONFIG_PATH
+    resume_path = ""
+    preferences_path = ""
+    csv_path = ""
+
+    if cfg_path and Path(cfg_path).exists():
+        import json
+        data = json.loads(Path(cfg_path).read_text())
+        # accept both camelCase and snake_case keys
+        resume_path = data.get("resumePath") or data.get("resume_path", "")
+        preferences_path = data.get("preferencesPath") or data.get("preferences_path", "")
+        csv_path = data.get("csvPath") or data.get("csv_path", "")
+
+    return _TEMPLATES.TemplateResponse(
+        request=request,
+        name="index.html",
+        context={
+            "config_path": cfg_path,
+            "resume_path": resume_path,
+            "preferences_path": preferences_path,
+            "csv_path": csv_path,
+        },
+    )
+
 
 app.include_router(jobs_router, prefix="/jobs", tags=["jobs"])
 app.include_router(discovery.router, prefix="/jobs", tags=["discovery"])

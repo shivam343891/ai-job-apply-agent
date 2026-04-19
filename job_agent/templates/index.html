@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Job Apply Agent</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    [x-cloak] { display: none !important; }
+  </style>
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen font-mono">
+
+<!-- ── CONFIG ─────────────────────────────────────────────────────────── -->
+<script>
+  // ── Behaviour flags ──────────────────────────────────────────────────
+  const CONFIRM_BEFORE_APPLY = true;   // set false to fire-and-forget
+
+  // ── Your paths (pre-filled from server via Jinja2) ───────────────────
+  const CFG = {
+    configPath:      "{{ config_path }}",
+    resumePath:      "{{ resume_path }}",
+    preferencesPath: "{{ preferences_path }}",
+    csvPath:         "{{ csv_path }}",
+  };
+</script>
+
+<!-- ── NAV ────────────────────────────────────────────────────────────── -->
+<nav class="border-b border-gray-800 px-6 py-3 flex items-center gap-6">
+  <span class="text-indigo-400 font-bold text-lg tracking-tight">JobAgent</span>
+  <button onclick="showTab('search')" id="tab-search"
+    class="tab-btn text-sm px-3 py-1 rounded transition">Search &amp; Apply</button>
+  <button onclick="showTab('tracker')" id="tab-tracker"
+    class="tab-btn text-sm px-3 py-1 rounded transition">Tracker</button>
+</nav>
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<!-- TAB 1 — SEARCH & APPLY                                              -->
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<div id="pane-search" class="tab-pane max-w-5xl mx-auto px-4 py-6">
+
+  <!-- Search form -->
+  <div class="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-6">
+    <h2 class="text-base font-semibold mb-4 text-gray-200">Search Jobs</h2>
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+      <div>
+        <label class="text-xs text-gray-400 mb-1 block">Search term</label>
+        <input id="s-term" type="text" value="Backend Engineer Python"
+          class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-indigo-500" />
+      </div>
+      <div>
+        <label class="text-xs text-gray-400 mb-1 block">Results per region</label>
+        <input id="s-count" type="number" value="10" min="1" max="50"
+          class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-indigo-500" />
+      </div>
+      <div>
+        <label class="text-xs text-gray-400 mb-1 block">Max age (hours)</label>
+        <input id="s-hours" type="number" value="72" min="1"
+          class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-indigo-500" />
+      </div>
+      <div>
+        <label class="text-xs text-gray-400 mb-1 block">Sites</label>
+        <input id="s-sites" type="text" value="linkedin,indeed,glassdoor,zip_recruiter"
+          class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-indigo-500" />
+      </div>
+    </div>
+    <button onclick="startSearch()"
+      class="bg-indigo-600 hover:bg-indigo-500 text-white text-sm px-5 py-2 rounded transition font-semibold">
+      Search
+    </button>
+  </div>
+
+  <!-- Progress bar -->
+  <div id="search-progress" class="hidden mb-4">
+    <div class="flex items-center justify-between text-xs text-gray-400 mb-1">
+      <span id="progress-label">Searching…</span>
+      <span id="progress-pct">0%</span>
+    </div>
+    <div class="w-full bg-gray-800 rounded-full h-2">
+      <div id="progress-bar" class="bg-indigo-500 h-2 rounded-full transition-all duration-300" style="width:0%"></div>
+    </div>
+  </div>
+
+  <!-- Results -->
+  <div id="results-list" class="space-y-3"></div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<!-- TAB 2 — TRACKER                                                     -->
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<div id="pane-tracker" class="tab-pane hidden max-w-6xl mx-auto px-4 py-6">
+
+  <div class="flex items-center justify-between mb-4">
+    <h2 class="text-base font-semibold text-gray-200">Application Tracker</h2>
+    <div class="flex gap-2">
+      <button onclick="loadTracker()"
+        class="text-xs bg-gray-800 hover:bg-gray-700 border border-gray-700 px-3 py-1.5 rounded transition">
+        ↻ Refresh
+      </button>
+      <button onclick="checkEmails()"
+        class="text-xs bg-indigo-700 hover:bg-indigo-600 px-3 py-1.5 rounded transition font-semibold">
+        Check Emails
+      </button>
+    </div>
+  </div>
+
+  <!-- Email results panel -->
+  <div id="email-panel" class="hidden mb-5 bg-gray-900 border border-indigo-800 rounded-xl p-4">
+    <div class="flex items-center justify-between mb-3">
+      <h3 class="text-sm font-semibold text-indigo-300">Inbox — Job-Related Emails</h3>
+      <button onclick="document.getElementById('email-panel').classList.add('hidden')"
+        class="text-gray-500 hover:text-gray-300 text-xs">✕ close</button>
+    </div>
+    <div id="email-list" class="space-y-2 text-sm"></div>
+  </div>
+
+  <!-- Tracker table -->
+  <div class="overflow-x-auto rounded-xl border border-gray-800">
+    <table class="min-w-full text-sm">
+      <thead class="bg-gray-900 text-gray-400 text-xs uppercase tracking-wider">
+        <tr id="tracker-head"></tr>
+      </thead>
+      <tbody id="tracker-body" class="divide-y divide-gray-800 bg-gray-950"></tbody>
+    </table>
+    <div id="tracker-empty" class="hidden text-center py-12 text-gray-500 text-sm">
+      No applications found. Make sure <code>csv_path</code> in your config points to a valid CSV.
+    </div>
+  </div>
+  <p class="text-xs text-gray-600 mt-2">Auto-refreshes every 30 seconds</p>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<!-- CONFIRMATION MODAL                                                   -->
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<div id="modal-overlay" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+  <div class="bg-gray-900 border border-gray-700 rounded-xl p-6 max-w-md w-full mx-4 shadow-2xl">
+    <h3 class="font-semibold text-lg mb-1 text-gray-100">Confirm Application</h3>
+    <p id="modal-job-title" class="text-indigo-300 text-sm mb-1"></p>
+    <p id="modal-company" class="text-gray-400 text-xs mb-4"></p>
+    <div class="bg-gray-800 rounded p-3 mb-4 text-xs text-gray-300 space-y-1">
+      <div><span class="text-gray-500">URL: </span><span id="modal-url" class="break-all"></span></div>
+      <div><span class="text-gray-500">Source: </span><span id="modal-source"></span></div>
+      <div><span class="text-gray-500">ATS Match: </span><span id="modal-score"></span></div>
+    </div>
+    <div class="flex gap-3 justify-end">
+      <button onclick="closeModal()" class="text-sm px-4 py-2 rounded border border-gray-600 hover:bg-gray-800 transition">
+        Cancel
+      </button>
+      <button onclick="confirmApply()" class="text-sm px-4 py-2 rounded bg-indigo-600 hover:bg-indigo-500 font-semibold transition">
+        Apply Now
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<!-- TOAST                                                                -->
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<div id="toast" class="hidden fixed bottom-5 right-5 bg-gray-800 border border-gray-700 text-sm text-gray-100 px-4 py-3 rounded-lg shadow-xl max-w-xs z-50"></div>
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<!-- JAVASCRIPT                                                           -->
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<script>
+// ── Tabs ───────────────────────────────────────────────────────────────
+function showTab(name) {
+  document.querySelectorAll('.tab-pane').forEach(p => p.classList.add('hidden'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('bg-gray-800','text-white'));
+  document.getElementById('pane-' + name).classList.remove('hidden');
+  document.getElementById('tab-' + name).classList.add('bg-gray-800','text-white');
+  if (name === 'tracker') loadTracker();
+}
+showTab('search');
+
+// ── Toast ──────────────────────────────────────────────────────────────
+function toast(msg, err=false) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = `fixed bottom-5 right-5 text-sm px-4 py-3 rounded-lg shadow-xl max-w-xs z-50 border ${
+    err ? 'bg-red-900 border-red-700 text-red-200' : 'bg-gray-800 border-gray-700 text-gray-100'
+  }`;
+  el.classList.remove('hidden');
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.classList.add('hidden'), 4000);
+}
+
+// ── Polling helper ─────────────────────────────────────────────────────
+async function pollJob(jobId, onProgress, onDone, onError) {
+  const iv = setInterval(async () => {
+    try {
+      const r = await fetch(`/jobs/${jobId}/status`);
+      const d = await r.json();
+      onProgress(d.progress || 0, d.status);
+      if (d.status === 'completed') { clearInterval(iv); onDone(d.result); }
+      if (d.status === 'failed')    { clearInterval(iv); onError(d.error); }
+    } catch(e) { clearInterval(iv); onError(String(e)); }
+  }, 1500);
+}
+
+// ── Search & Apply ─────────────────────────────────────────────────────
+let _pendingApply = null;
+
+async function startSearch() {
+  const term  = document.getElementById('s-term').value.trim();
+  const count = parseInt(document.getElementById('s-count').value) || 10;
+  const hours = parseInt(document.getElementById('s-hours').value) || 72;
+  const sites = document.getElementById('s-sites').value.split(',').map(s=>s.trim()).filter(Boolean);
+
+  if (!term) { toast('Enter a search term', true); return; }
+
+  document.getElementById('results-list').innerHTML = '';
+  const prog = document.getElementById('search-progress');
+  prog.classList.remove('hidden');
+  setProgress(0, 'Starting search across 6 regions…');
+
+  const res = await fetch('/jobs/search', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      search_term: term,
+      results_per_region: count,
+      hours_old: hours,
+      site_names: sites,
+      preferences_path: CFG.preferencesPath,
+    })
+  });
+  const { job_id } = await res.json();
+
+  pollJob(job_id,
+    (pct, status) => setProgress(pct, status === 'running' ? 'Scraping…' : status),
+    (result) => {
+      setProgress(100, `Found ${result.count} jobs`);
+      renderJobs(result.jobs || []);
+    },
+    (err) => { toast('Search failed: ' + err, true); prog.classList.add('hidden'); }
+  );
+}
+
+function setProgress(pct, label) {
+  document.getElementById('progress-bar').style.width = pct + '%';
+  document.getElementById('progress-pct').textContent = pct + '%';
+  document.getElementById('progress-label').textContent = label;
+}
+
+function ratingClass(r) {
+  return { High:'bg-green-900 text-green-300', Medium:'bg-yellow-900 text-yellow-300',
+           Low:'bg-red-900 text-red-300', Skip:'bg-gray-800 text-gray-500' }[r] || 'bg-gray-800 text-gray-400';
+}
+
+function renderJobs(jobs) {
+  const list = document.getElementById('results-list');
+  if (!jobs.length) {
+    list.innerHTML = '<p class="text-gray-500 text-sm text-center py-8">No jobs found. Try different search terms or increase the age window.</p>';
+    return;
+  }
+  jobs.forEach((job, i) => {
+    const rating  = job.fit?.rating || '';
+    const score   = job.fit?.score  || null;
+    const url     = job.job_url || job.link || '';
+    const source  = job.site || job.source || '';
+    const card = document.createElement('div');
+    card.id = `job-${i}`;
+    card.className = 'bg-gray-900 border border-gray-800 rounded-xl p-4 transition';
+    card.innerHTML = `
+      <div class="flex items-start justify-between gap-3 mb-2">
+        <div>
+          <h3 class="font-semibold text-gray-100 text-sm leading-tight">${esc(job.title || '—')}</h3>
+          <p class="text-xs text-gray-400 mt-0.5">${esc(job.company || '')}${job.location ? ' · ' + esc(job.location) : ''}</p>
+        </div>
+        <div class="flex items-center gap-2 shrink-0">
+          ${rating ? `<span class="text-xs px-2 py-0.5 rounded-full font-medium ${ratingClass(rating)}">${rating}${score !== null ? ' · ' + score : ''}</span>` : ''}
+          ${url ? `<a href="${esc(url)}" target="_blank" class="text-xs text-indigo-400 hover:underline">View ↗</a>` : ''}
+        </div>
+      </div>
+      <div class="flex flex-wrap gap-2 mt-3">
+        <button onclick="analyzeJob(${i})" class="text-xs bg-gray-800 hover:bg-gray-700 border border-gray-700 px-2.5 py-1 rounded transition">
+          Analyze
+        </button>
+        <button onclick="triggerApply(${i})" class="text-xs bg-indigo-700 hover:bg-indigo-600 px-2.5 py-1 rounded transition font-semibold">
+          Apply
+        </button>
+      </div>
+      <div id="analysis-${i}" class="hidden mt-3 space-y-2"></div>
+      <div id="apply-status-${i}" class="hidden mt-2 text-xs text-gray-400"></div>
+    `;
+    card._job = job;
+    card._jobIndex = i;
+    list.appendChild(card);
+  });
+}
+
+// store job data keyed by index for easy lookup
+const _jobs = {};
+function renderJobs(jobs) {
+  const list = document.getElementById('results-list');
+  if (!jobs.length) {
+    list.innerHTML = '<p class="text-gray-500 text-sm text-center py-8">No jobs found.</p>';
+    return;
+  }
+  list.innerHTML = '';
+  jobs.forEach((job, i) => {
+    _jobs[i] = job;
+    const rating = job.fit?.rating || '';
+    const score  = job.fit?.score  || null;
+    const url    = job.job_url || job.link || '';
+    const card = document.createElement('div');
+    card.className = 'bg-gray-900 border border-gray-800 rounded-xl p-4';
+    card.innerHTML = `
+      <div class="flex items-start justify-between gap-3 mb-1">
+        <div>
+          <h3 class="font-semibold text-gray-100 text-sm">${esc(job.title || '—')}</h3>
+          <p class="text-xs text-gray-400 mt-0.5">${esc(job.company || '')}${job.location ? ' · ' + esc(job.location) : ''}</p>
+        </div>
+        <div class="flex items-center gap-2 shrink-0">
+          ${rating ? `<span class="text-xs px-2 py-0.5 rounded-full font-medium ${ratingClass(rating)}">${rating}${score !== null ? ' · ' + score : ''}</span>` : ''}
+          ${url ? `<a href="${esc(url)}" target="_blank" class="text-xs text-indigo-400 hover:underline">View ↗</a>` : ''}
+        </div>
+      </div>
+      <div class="flex flex-wrap gap-2 mt-3">
+        <button onclick="analyzeJob(${i})"
+          class="text-xs bg-gray-800 hover:bg-gray-700 border border-gray-700 px-2.5 py-1 rounded transition">
+          Analyze
+        </button>
+        <button onclick="triggerApply(${i})"
+          class="text-xs bg-indigo-700 hover:bg-indigo-600 px-2.5 py-1 rounded transition font-semibold">
+          Apply
+        </button>
+      </div>
+      <div id="analysis-${i}" class="hidden mt-3"></div>
+      <div id="apply-status-${i}" class="hidden mt-2 text-xs text-gray-400"></div>
+    `;
+    list.appendChild(card);
+  });
+}
+
+async function analyzeJob(i) {
+  const job  = _jobs[i];
+  const box  = document.getElementById(`analysis-${i}`);
+  const desc = job.description || job.title || '';
+  box.classList.remove('hidden');
+  box.innerHTML = '<p class="text-xs text-gray-500 animate-pulse">Analyzing…</p>';
+
+  try {
+    const [ats, jd] = await Promise.all([
+      fetch('/resume/ats-score', { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ resume_path: CFG.resumePath, job_description: desc }) }).then(r=>r.json()),
+      fetch('/resume/analyze-jd', { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ resume_path: CFG.resumePath, job_description: desc }) }).then(r=>r.json()),
+    ]);
+
+    const missingTags = (ats.missing_keywords || []).slice(0,8)
+      .map(k => `<span class="bg-red-900/50 text-red-300 px-1.5 py-0.5 rounded text-xs">${esc(k)}</span>`).join(' ');
+    const matchTags = (ats.matched_keywords || []).slice(0,8)
+      .map(k => `<span class="bg-green-900/50 text-green-300 px-1.5 py-0.5 rounded text-xs">${esc(k)}</span>`).join(' ');
+
+    box.innerHTML = `
+      <div class="bg-gray-800/60 rounded-lg p-3 space-y-2 text-xs">
+        <div class="flex items-center gap-2">
+          <span class="text-gray-400">ATS Score</span>
+          <span class="font-bold text-sm ${ats.score >= 70 ? 'text-green-400' : ats.score >= 40 ? 'text-yellow-400' : 'text-red-400'}">${ats.score}%</span>
+        </div>
+        ${matchTags ? `<div><span class="text-gray-500 block mb-1">Matched keywords</span>${matchTags}</div>` : ''}
+        ${missingTags ? `<div><span class="text-gray-500 block mb-1">Missing keywords</span>${missingTags}</div>` : ''}
+        <p class="text-gray-300 leading-relaxed">${esc(jd.positioning_narrative || '')}</p>
+        ${(ats.recommendations || []).map(r => `<p class="text-yellow-300/80">⚡ ${esc(r)}</p>`).join('')}
+        <div class="flex gap-2 pt-1">
+          <button onclick="tailorResume(${i})"
+            class="bg-gray-700 hover:bg-gray-600 border border-gray-600 px-2.5 py-1 rounded transition">
+            /tailor-resume
+          </button>
+          <button onclick="genCoverLetter(${i})"
+            class="bg-gray-700 hover:bg-gray-600 border border-gray-600 px-2.5 py-1 rounded transition">
+            /cover-letter
+          </button>
+        </div>
+        <div id="skill-output-${i}" class="hidden"></div>
+      </div>
+    `;
+  } catch(e) {
+    box.innerHTML = `<p class="text-xs text-red-400">Analysis failed: ${esc(String(e))}</p>`;
+  }
+}
+
+async function tailorResume(i) {
+  const job = _jobs[i];
+  const out = document.getElementById(`skill-output-${i}`);
+  out.classList.remove('hidden');
+  out.innerHTML = '<p class="text-xs text-gray-500 animate-pulse">Fetching tailor instructions…</p>';
+  try {
+    const r = await fetch('/resume/tailor', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ resume_path: CFG.resumePath, job_description: job.description || job.title || '',
+        job_title: job.title || '' }) });
+    const d = await r.json();
+    out.innerHTML = `
+      <div class="bg-indigo-950 border border-indigo-800 rounded p-2 mt-1">
+        <p class="text-indigo-300 font-semibold mb-1">Tailor Resume</p>
+        <p class="text-gray-300">${esc(d.message)}</p>
+        <p class="text-gray-500 mt-1">Match score: ${d.quick_analysis?.match_score ?? '—'}%</p>
+        <p class="text-gray-500">Top gaps: ${(d.quick_analysis?.top_missing_keywords||[]).slice(0,5).join(', ') || 'none'}</p>
+      </div>`;
+  } catch(e) { out.innerHTML = `<p class="text-xs text-red-400">${esc(String(e))}</p>`; }
+}
+
+async function genCoverLetter(i) {
+  const job = _jobs[i];
+  const out = document.getElementById(`skill-output-${i}`);
+  out.classList.remove('hidden');
+  out.innerHTML = '<p class="text-xs text-gray-500 animate-pulse">Fetching cover letter instructions…</p>';
+  try {
+    const r = await fetch('/resume/cover-letter', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ resume_path: CFG.resumePath, job_description: job.description || job.title || '',
+        company_name: job.company || '', job_title: job.title || '' }) });
+    const d = await r.json();
+    out.innerHTML = `
+      <div class="bg-indigo-950 border border-indigo-800 rounded p-2 mt-1">
+        <p class="text-indigo-300 font-semibold mb-1">Cover Letter</p>
+        <p class="text-gray-300">${esc(d.message)}</p>
+        <p class="text-gray-500 mt-1">Match score: ${d.quick_analysis?.match_score ?? '—'}%</p>
+      </div>`;
+  } catch(e) { out.innerHTML = `<p class="text-xs text-red-400">${esc(String(e))}</p>`; }
+}
+
+// ── Apply flow ─────────────────────────────────────────────────────────
+function applyEndpoint(job) {
+  const url = (job.job_url || job.link || '').toLowerCase();
+  if (url.includes('linkedin'))   return '/apply/linkedin/apply';
+  if (url.includes('lever'))      return '/apply/lever/apply';
+  if (url.includes('greenhouse')) return '/apply/greenhouse/apply';
+  if (url.includes('jobvite'))    return '/apply/jobvite/apply';
+  if (url.includes('ashby'))      return '/apply/ashby/apply';
+  return '/apply/linkedin/apply'; // fallback
+}
+
+function triggerApply(i) {
+  const job = _jobs[i];
+  if (CONFIRM_BEFORE_APPLY) {
+    _pendingApply = i;
+    document.getElementById('modal-job-title').textContent = job.title || '—';
+    document.getElementById('modal-company').textContent   = job.company || '';
+    document.getElementById('modal-url').textContent       = job.job_url || job.link || '—';
+    document.getElementById('modal-source').textContent    = job.site || job.source || '—';
+    document.getElementById('modal-score').textContent     = job.fit ? `${job.fit.rating} (${job.fit.score})` : '—';
+    document.getElementById('modal-overlay').classList.remove('hidden');
+  } else {
+    fireApply(i);
+  }
+}
+
+function closeModal() {
+  document.getElementById('modal-overlay').classList.add('hidden');
+  _pendingApply = null;
+}
+
+function confirmApply() {
+  closeModal();
+  if (_pendingApply !== null) fireApply(_pendingApply);
+}
+
+async function fireApply(i) {
+  const job = _jobs[i];
+  const statusEl = document.getElementById(`apply-status-${i}`);
+  statusEl.classList.remove('hidden');
+  statusEl.textContent = '⏳ Submitting application…';
+
+  const endpoint = applyEndpoint(job);
+  try {
+    const res = await fetch(endpoint, { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ job_url: job.job_url || job.link, config_path: CFG.configPath }) });
+    const { job_id } = await res.json();
+
+    pollJob(job_id,
+      (pct) => { statusEl.textContent = `⏳ Applying… ${pct}%`; },
+      (result) => {
+        if (result?.success) {
+          statusEl.textContent = '✅ Application submitted!';
+          statusEl.className = 'mt-2 text-xs text-green-400';
+          toast(`Applied to ${job.title} at ${job.company}`);
+        } else {
+          statusEl.textContent = `⚠️ Apply ended: ${result?.reason || 'unknown'}`;
+          statusEl.className = 'mt-2 text-xs text-yellow-400';
+        }
+      },
+      (err) => {
+        statusEl.textContent = `❌ Error: ${err}`;
+        statusEl.className = 'mt-2 text-xs text-red-400';
+      }
+    );
+  } catch(e) {
+    statusEl.textContent = '❌ Request failed: ' + String(e);
+    statusEl.className = 'mt-2 text-xs text-red-400';
+  }
+}
+
+// ── Tracker ────────────────────────────────────────────────────────────
+let _trackerTimer = null;
+
+async function loadTracker() {
+  if (!CFG.csvPath) {
+    document.getElementById('tracker-empty').classList.remove('hidden');
+    return;
+  }
+  try {
+    const r = await fetch(`/tracker/list?csv_path=${encodeURIComponent(CFG.csvPath)}`);
+    const d = await r.json();
+    renderTracker(d.applications || []);
+  } catch(e) { toast('Tracker load failed: ' + e, true); }
+}
+
+const STATUS_COLORS = {
+  applied:    'bg-blue-900/60 text-blue-300',
+  interview:  'bg-purple-900/60 text-purple-300',
+  offer:      'bg-green-900/60 text-green-300',
+  rejected:   'bg-red-900/60 text-red-300',
+  withdrawn:  'bg-gray-800 text-gray-400',
+};
+
+function statusBadge(status) {
+  const s = (status || '').toLowerCase();
+  const cls = Object.entries(STATUS_COLORS).find(([k]) => s.includes(k))?.[1] || 'bg-gray-800 text-gray-400';
+  return `<span class="inline-block text-xs px-2 py-0.5 rounded-full font-medium ${cls}">${esc(status || '—')}</span>`;
+}
+
+const PRIORITY_COLS = ['company','role','location','status','date_applied','source','notes'];
+
+function renderTracker(rows) {
+  const empty = document.getElementById('tracker-empty');
+  const head  = document.getElementById('tracker-head');
+  const body  = document.getElementById('tracker-body');
+
+  if (!rows.length) { empty.classList.remove('hidden'); head.innerHTML=''; body.innerHTML=''; return; }
+  empty.classList.add('hidden');
+
+  // Column order: priority cols first, then the rest
+  const allCols  = Object.keys(rows[0]);
+  const orderedCols = [
+    ...PRIORITY_COLS.filter(c => allCols.includes(c)),
+    ...allCols.filter(c => !PRIORITY_COLS.includes(c)),
+  ];
+
+  head.innerHTML = orderedCols.map(c =>
+    `<th class="px-4 py-2.5 text-left whitespace-nowrap">${esc(c.replace(/_/g,' '))}</th>`
+  ).join('');
+
+  body.innerHTML = rows.map(row => `
+    <tr class="hover:bg-gray-900/50 transition">
+      ${orderedCols.map(c => {
+        const val = row[c] || '';
+        if (c === 'status') return `<td class="px-4 py-2.5">${statusBadge(val)}</td>`;
+        if (c === 'role' || c === 'company') return `<td class="px-4 py-2.5 font-medium text-gray-200 whitespace-nowrap">${esc(val)}</td>`;
+        return `<td class="px-4 py-2.5 text-gray-400 whitespace-nowrap max-w-xs truncate">${esc(val)}</td>`;
+      }).join('')}
+    </tr>`
+  ).join('');
+}
+
+async function checkEmails() {
+  const panel = document.getElementById('email-panel');
+  const list  = document.getElementById('email-list');
+  panel.classList.remove('hidden');
+  list.innerHTML = '<p class="text-xs text-gray-500 animate-pulse">Searching inbox…</p>';
+
+  try {
+    const r = await fetch('/email/search', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ query: 'job application interview offer', max_results: 15, mark_read: false }) });
+    const d = await r.json();
+    if (!d.messages?.length) {
+      list.innerHTML = '<p class="text-gray-500 text-xs">No job-related emails found.</p>';
+      return;
+    }
+    list.innerHTML = d.messages.map(m => `
+      <div class="bg-gray-800 rounded-lg px-3 py-2">
+        <div class="flex items-center justify-between">
+          <span class="font-medium text-gray-200 text-xs">${esc(m.sender)}</span>
+        </div>
+        <p class="text-gray-300 text-xs mt-0.5">${esc(m.subject)}</p>
+        <p class="text-gray-500 text-xs mt-0.5 truncate">${esc(m.preview)}</p>
+      </div>`).join('');
+  } catch(e) {
+    list.innerHTML = `<p class="text-xs text-red-400">Failed: ${esc(String(e))}. Make sure Chrome is open with Outlook and started with --remote-debugging-port=9222</p>`;
+  }
+}
+
+// Auto-refresh tracker every 30s when on that tab
+setInterval(() => {
+  if (!document.getElementById('pane-tracker').classList.contains('hidden')) loadTracker();
+}, 30000);
+
+// ── Utility ────────────────────────────────────────────────────────────
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+</script>
+</body>
+</html>
