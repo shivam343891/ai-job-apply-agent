@@ -1,5 +1,30 @@
 """Browser launch and CDP connect helpers."""
+import asyncio
+import concurrent.futures
 from playwright.async_api import async_playwright, Browser, BrowserContext, Page
+
+
+def run_playwright_sync(async_fn, *args, **kwargs):
+    """
+    Run an async Playwright coroutine in a dedicated thread with its own
+    ProactorEventLoop. Required on Windows because Playwright needs to spawn
+    subprocesses, which fails inside FastAPI's already-running loop.
+    """
+    def _thread():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        if hasattr(asyncio, "WindowsProactorEventLoopPolicy"):
+            asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        try:
+            return loop.run_until_complete(async_fn(*args, **kwargs))
+        finally:
+            loop.close()
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(_thread)
+        return future.result()
 
 
 async def launch_browser(headless: bool = False) -> tuple[Browser, BrowserContext]:

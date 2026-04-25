@@ -3,13 +3,12 @@ Lever application automation — single-page form.
   POST /apply/lever/apply → async, returns job_id
 """
 import asyncio
+import concurrent.futures
 from fastapi import APIRouter, BackgroundTasks
 from pydantic import BaseModel
 from job_agent import jobs as job_store
-from job_agent.config import load_config
-from job_agent.automation.browser import launch_browser
+from job_agent.config import load_config, load_answer_bank
 from job_agent.automation.answer_engine import fill_text, pick_option, build_context_from_config
-from job_agent.config import load_answer_bank
 from job_agent.automation.submission import detect_captcha, click_submit, monitor_submission
 
 router = APIRouter()
@@ -21,15 +20,10 @@ class LeverApplyRequest(BaseModel):
 
 
 async def _fill_location_via_api(page, location: str) -> bool:
-    """Use Lever's internal location search API."""
     import httpx
     base_url = page.url.split("/apply")[0]
     async with httpx.AsyncClient() as client:
-        resp = await client.get(
-            f"{base_url}/api/v1/locations",
-            params={"q": location},
-            timeout=5,
-        )
+        resp = await client.get(f"{base_url}/api/v1/locations", params={"q": location}, timeout=5)
         if resp.status_code == 200:
             results = resp.json()
             if results:
@@ -40,7 +34,9 @@ async def _fill_location_via_api(page, location: str) -> bool:
     return False
 
 
-async def _apply(job_id: str, req: LeverApplyRequest):
+async def _playwright_apply(job_id: str, req: LeverApplyRequest):
+    from job_agent.automation.browser import launch_browser
+
     cfg = load_config(req.config_path)
     answer_bank = load_answer_bank(cfg.answer_bank_path)
     ctx_data = build_context_from_config(cfg, answer_bank)
@@ -55,7 +51,6 @@ async def _apply(job_id: str, req: LeverApplyRequest):
         await browser.close()
         return {"success": False, "reason": "captcha_on_load", "events": events}
 
-    # Fill by name= attribute
     fields = await page.query_selector_all("input[name], textarea[name], select[name]")
     for el in fields:
         name = await el.get_attribute("name") or ""
@@ -65,10 +60,8 @@ async def _apply(job_id: str, req: LeverApplyRequest):
         else:
             await fill_text(page, el, name, ctx_data)
 
-    # Location via internal API
     await _fill_location_via_api(page, cfg.identity.location)
 
-    # Resume upload
     resume_input = await page.query_selector("input[type='file']")
     if resume_input and cfg.resume_path:
         await resume_input.set_input_files(cfg.resume_path)
@@ -81,13 +74,31 @@ async def _apply(job_id: str, req: LeverApplyRequest):
 
     result = await click_submit(page, cfg.auto_submit)
     events.append({"stage": "submit", **result})
-
     if result.get("submitted"):
         monitor = await monitor_submission(page)
         events.append({"stage": "monitor", **monitor})
 
     await browser.close()
     return {"success": result.get("submitted", False), "events": events}
+
+
+def _run_in_thread(job_id: str, req: LeverApplyRequest):
+    loop = asyncio.new_event_loop()
+    if hasattr(asyncio, "WindowsProactorEventLoopPolicy"):
+        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+        loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(_playwright_apply(job_id, req))
+    finally:
+        loop.close()
+
+
+async def _apply(job_id: str, req: LeverApplyRequest):
+    loop = asyncio.get_event_loop()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        result = await loop.run_in_executor(pool, _run_in_thread, job_id, req)
+    return result
 
 
 @router.post("/apply")

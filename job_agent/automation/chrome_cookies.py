@@ -1,56 +1,52 @@
-"""Extract LinkedIn cookies from Chrome and convert to Playwright-compatible JSON."""
+"""Load LinkedIn cookies from a manually exported JSON file."""
 import json
-import shutil
-import sqlite3
-import tempfile
 from pathlib import Path
 
-import browser_cookie3
-
-
-def extract_linkedin_cookies() -> list[dict]:
-    """
-    Read LinkedIn cookies from Chrome using browser-cookie3 (handles DPAPI decryption on Windows).
-    Returns a list of cookie dicts compatible with Playwright's add_cookies().
-    """
-    jar = browser_cookie3.chrome(domain_name=".linkedin.com")
-    cookies = []
-    for c in jar:
-        cookie: dict = {
-            "name": c.name,
-            "value": c.value,
-            "domain": c.domain,
-            "path": c.path,
-            "secure": bool(c.secure),
-            "httpOnly": False,
-            "sameSite": "None",
-        }
-        if c.expires:
-            cookie["expires"] = int(c.expires)
-        cookies.append(cookie)
-    return cookies
+_DEFAULT_CACHE = Path(__file__).parent.parent / "linkedin_cookies.json"
 
 
 def get_linkedin_cookies(cache_path: str | None = None) -> list[dict]:
     """
-    Return LinkedIn cookies, writing to cache_path if provided (for debugging/inspection).
-    Raises RuntimeError if Chrome is open and the cookie DB is locked.
-    """
-    try:
-        cookies = extract_linkedin_cookies()
-    except Exception as e:
-        raise RuntimeError(
-            f"Failed to extract Chrome cookies: {e}\n"
-            "Make sure Chrome is closed or try closing it and retrying."
-        ) from e
+    Load LinkedIn cookies from a JSON file exported via Cookie-Editor extension.
 
-    if not cookies:
+    To generate the file:
+    1. Install Cookie-Editor extension in Chrome
+    2. Go to linkedin.com (logged in)
+    3. Click Cookie-Editor → Export → Export as JSON
+    4. Save to job_agent/linkedin_cookies.json
+    """
+    cache = Path(cache_path) if cache_path else _DEFAULT_CACHE
+
+    if not cache.exists():
         raise RuntimeError(
-            "No LinkedIn cookies found in Chrome. "
-            "Please log in to LinkedIn in Chrome first."
+            f"LinkedIn cookies file not found: {cache}\n"
+            "Export cookies from LinkedIn using the Cookie-Editor Chrome extension:\n"
+            "  1. Go to linkedin.com (logged in)\n"
+            "  2. Click Cookie-Editor extension → Export → Export as JSON\n"
+            f"  3. Save to {cache}"
         )
 
-    if cache_path:
-        Path(cache_path).write_text(json.dumps(cookies, indent=2))
+    raw = json.loads(cache.read_text())
+
+    # Cookie-Editor exports a list; normalize to Playwright format
+    cookies = []
+    for c in raw:
+        cookie = {
+            "name": c.get("name", ""),
+            "value": c.get("value", ""),
+            "domain": c.get("domain", ".linkedin.com"),
+            "path": c.get("path", "/"),
+            "secure": c.get("secure", True),
+            "httpOnly": c.get("httpOnly", False),
+            "sameSite": c.get("sameSite", "None"),
+        }
+        if c.get("expirationDate"):
+            cookie["expires"] = int(c["expirationDate"])
+        elif c.get("expires"):
+            cookie["expires"] = int(c["expires"])
+        cookies.append(cookie)
+
+    if not cookies:
+        raise RuntimeError(f"Cookie file is empty: {cache}")
 
     return cookies

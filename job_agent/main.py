@@ -18,7 +18,7 @@ app = FastAPI(title="AI Job Apply Agent", version="1.0.0")
 _TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 # Config path is read from env var so the server knows which config to pre-fill in the UI
-_CONFIG_PATH = os.environ.get("JOB_AGENT_CONFIG", "F:/Custom_Projects/ai-job-apply-agent/my_config.json")
+_CONFIG_PATH = os.environ.get("JOB_AGENT_CONFIG", Path(__file__).parent.joinpath("config.json").as_posix())
 
 
 @app.get("/", response_class=HTMLResponse)

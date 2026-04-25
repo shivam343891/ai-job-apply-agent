@@ -138,6 +138,7 @@ celerybeat.pid
 .env
 .envrc
 .venv
+.vscode
 
 # Personal config (contains PII — never commit)
 job_agent/config.json

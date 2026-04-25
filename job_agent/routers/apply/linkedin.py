@@ -3,13 +3,12 @@ LinkedIn Easy Apply automation.
   POST /apply/linkedin/apply → async, returns job_id
 """
 import asyncio
+import concurrent.futures
 from fastapi import APIRouter, BackgroundTasks
 from pydantic import BaseModel
 from job_agent import jobs as job_store
-from job_agent.config import load_config
-from job_agent.automation.browser import launch_browser, load_linkedin_cookies
+from job_agent.config import load_config, load_answer_bank
 from job_agent.automation.answer_engine import fill_text, pick_option, pick_choice, build_context_from_config
-from job_agent.config import load_answer_bank
 from job_agent.automation.submission import detect_captcha, click_submit, monitor_submission
 
 router = APIRouter()
@@ -22,7 +21,9 @@ class LinkedInApplyRequest(BaseModel):
     config_path: str
 
 
-async def _apply(job_id: str, req: LinkedInApplyRequest):
+async def _playwright_apply(job_id: str, req: LinkedInApplyRequest):
+    from job_agent.automation.browser import launch_browser, load_linkedin_cookies
+
     cfg = load_config(req.config_path)
     answer_bank = load_answer_bank(cfg.answer_bank_path)
     context_data = build_context_from_config(cfg, answer_bank)
@@ -35,7 +36,6 @@ async def _apply(job_id: str, req: LinkedInApplyRequest):
     await page.goto(req.job_url, wait_until="networkidle")
     events.append({"stage": "navigate", "url": req.job_url})
 
-    # Click Easy Apply button
     easy_apply = await page.query_selector("button.jobs-apply-button")
     if not easy_apply:
         await browser.close()
@@ -46,20 +46,15 @@ async def _apply(job_id: str, req: LinkedInApplyRequest):
     for step in range(MAX_STEPS):
         job_store.update_job(job_id, progress=int((step / MAX_STEPS) * 80))
 
-        # Captcha check
         if await detect_captcha(page):
             events.append({"stage": f"step_{step}", "issue": "captcha_detected"})
             await browser.close()
             return {"success": False, "reason": "captcha", "events": events}
 
-        # Fill all visible inputs
-        inputs = await page.query_selector_all(
-            "input:visible, select:visible, textarea:visible"
-        )
+        inputs = await page.query_selector_all("input:visible, select:visible, textarea:visible")
         for el in inputs:
             tag = await el.evaluate("el => el.tagName.toLowerCase()")
             el_type = (await el.get_attribute("type") or "text").lower()
-            # Find label
             el_id = await el.get_attribute("id") or ""
             label_el = await page.query_selector(f"label[for='{el_id}']")
             label = await label_el.inner_text() if label_el else el_id
@@ -76,8 +71,7 @@ async def _apply(job_id: str, req: LinkedInApplyRequest):
 
         events.append({"stage": f"step_{step}", "inputs_processed": len(inputs)})
 
-        # Look for Next or Review/Submit button
-        next_btn = await page.query_selector("button[aria-label='Continue to next step']")
+        next_btn   = await page.query_selector("button[aria-label='Continue to next step']")
         review_btn = await page.query_selector("button[aria-label='Review your application']")
         submit_btn = await page.query_selector("button[aria-label='Submit application']")
 
@@ -100,11 +94,30 @@ async def _apply(job_id: str, req: LinkedInApplyRequest):
             await page.wait_for_timeout(1000)
             continue
 
-        # No navigation button — dialog may have closed
         break
 
     await browser.close()
     return {"success": False, "reason": "max_steps_reached", "events": events}
+
+
+def _run_in_thread(job_id: str, req: LinkedInApplyRequest):
+    """Run the Playwright session in a fresh thread with its own event loop."""
+    loop = asyncio.new_event_loop()
+    if hasattr(asyncio, "WindowsProactorEventLoopPolicy"):
+        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+        loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(_playwright_apply(job_id, req))
+    finally:
+        loop.close()
+
+
+async def _apply(job_id: str, req: LinkedInApplyRequest):
+    loop = asyncio.get_event_loop()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        result = await loop.run_in_executor(pool, _run_in_thread, job_id, req)
+    return result
 
 
 @router.post("/apply")

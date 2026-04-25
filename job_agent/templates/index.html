@@ -18,10 +18,10 @@
 
   // ── Your paths (pre-filled from server via Jinja2) ───────────────────
   const CFG = {
-    configPath:      "{{ config_path }}",
-    resumePath:      "{{ resume_path }}",
-    preferencesPath: "{{ preferences_path }}",
-    csvPath:         "{{ csv_path }}",
+    configPath:      {{ config_path | tojson }},
+    resumePath:      {{ resume_path | tojson }},
+    preferencesPath: {{ preferences_path | tojson }},
+    csvPath:         {{ csv_path | tojson }},
   };
 </script>
 
@@ -289,48 +289,6 @@ function ratingClass(r) {
            Low:'bg-red-900 text-red-300', Skip:'bg-gray-800 text-gray-500' }[r] || 'bg-gray-800 text-gray-400';
 }
 
-function renderJobs(jobs) {
-  const list = document.getElementById('results-list');
-  if (!jobs.length) {
-    list.innerHTML = '<p class="text-gray-500 text-sm text-center py-8">No jobs found. Try different search terms or increase the age window.</p>';
-    return;
-  }
-  jobs.forEach((job, i) => {
-    const rating  = job.fit?.rating || '';
-    const score   = job.fit?.score  || null;
-    const url     = job.job_url || job.link || '';
-    const source  = job.site || job.source || '';
-    const card = document.createElement('div');
-    card.id = `job-${i}`;
-    card.className = 'bg-gray-900 border border-gray-800 rounded-xl p-4 transition';
-    card.innerHTML = `
-      <div class="flex items-start justify-between gap-3 mb-2">
-        <div>
-          <h3 class="font-semibold text-gray-100 text-sm leading-tight">${esc(job.title || '—')}</h3>
-          <p class="text-xs text-gray-400 mt-0.5">${esc(job.company || '')}${job.location ? ' · ' + esc(job.location) : ''}</p>
-        </div>
-        <div class="flex items-center gap-2 shrink-0">
-          ${rating ? `<span class="text-xs px-2 py-0.5 rounded-full font-medium ${ratingClass(rating)}">${rating}${score !== null ? ' · ' + score : ''}</span>` : ''}
-          ${url ? `<a href="${esc(url)}" target="_blank" class="text-xs text-indigo-400 hover:underline">View ↗</a>` : ''}
-        </div>
-      </div>
-      <div class="flex flex-wrap gap-2 mt-3">
-        <button onclick="analyzeJob(${i})" class="text-xs bg-gray-800 hover:bg-gray-700 border border-gray-700 px-2.5 py-1 rounded transition">
-          Analyze
-        </button>
-        <button onclick="triggerApply(${i})" class="text-xs bg-indigo-700 hover:bg-indigo-600 px-2.5 py-1 rounded transition font-semibold">
-          Apply
-        </button>
-      </div>
-      <div id="analysis-${i}" class="hidden mt-3 space-y-2"></div>
-      <div id="apply-status-${i}" class="hidden mt-2 text-xs text-gray-400"></div>
-    `;
-    card._job = job;
-    card._jobIndex = i;
-    list.appendChild(card);
-  });
-}
-
 // store job data keyed by index for easy lookup
 const _jobs = {};
 function renderJobs(jobs) {
@@ -363,10 +321,10 @@ function renderJobs(jobs) {
           class="text-xs bg-gray-800 hover:bg-gray-700 border border-gray-700 px-2.5 py-1 rounded transition">
           Analyze
         </button>
-        <button onclick="triggerApply(${i})"
-          class="text-xs bg-indigo-700 hover:bg-indigo-600 px-2.5 py-1 rounded transition font-semibold">
-          Apply
-        </button>
+        ${isSupported(job)
+            ? `<button onclick="triggerApply(${i})" class="text-xs bg-indigo-700 hover:bg-indigo-600 px-2.5 py-1 rounded transition font-semibold">Auto Apply</button>`
+            : `<button onclick="triggerApply(${i})" class="text-xs bg-gray-700 hover:bg-gray-600 border border-gray-600 px-2.5 py-1 rounded transition">Apply Manually ↗</button>`
+        }
       </div>
       <div id="analysis-${i}" class="hidden mt-3"></div>
       <div id="apply-status-${i}" class="hidden mt-2 text-xs text-gray-400"></div>
@@ -469,6 +427,8 @@ async function genCoverLetter(i) {
 }
 
 // ── Apply flow ─────────────────────────────────────────────────────────
+const SUPPORTED_ATS = ['linkedin', 'lever', 'greenhouse', 'jobvite', 'ashby'];
+
 function applyEndpoint(job) {
   const url = (job.job_url || job.link || '').toLowerCase();
   if (url.includes('linkedin'))   return '/apply/linkedin/apply';
@@ -476,16 +436,30 @@ function applyEndpoint(job) {
   if (url.includes('greenhouse')) return '/apply/greenhouse/apply';
   if (url.includes('jobvite'))    return '/apply/jobvite/apply';
   if (url.includes('ashby'))      return '/apply/ashby/apply';
-  return '/apply/linkedin/apply'; // fallback
+  return null;
+}
+
+function isSupported(job) {
+  const url = (job.job_url || job.link || '').toLowerCase();
+  return SUPPORTED_ATS.some(ats => url.includes(ats));
 }
 
 function triggerApply(i) {
   const job = _jobs[i];
+  const url = job.job_url || job.link || '';
+
+  if (!isSupported(job)) {
+    // Unsupported ATS — open URL for manual apply
+    if (url) window.open(url, '_blank');
+    else toast('No URL available for this job', true);
+    return;
+  }
+
   if (CONFIRM_BEFORE_APPLY) {
     _pendingApply = i;
     document.getElementById('modal-job-title').textContent = job.title || '—';
     document.getElementById('modal-company').textContent   = job.company || '';
-    document.getElementById('modal-url').textContent       = job.job_url || job.link || '—';
+    document.getElementById('modal-url').textContent       = url || '—';
     document.getElementById('modal-source').textContent    = job.site || job.source || '—';
     document.getElementById('modal-score').textContent     = job.fit ? `${job.fit.rating} (${job.fit.score})` : '—';
     document.getElementById('modal-overlay').classList.remove('hidden');
@@ -500,8 +474,9 @@ function closeModal() {
 }
 
 function confirmApply() {
+  const idx = _pendingApply;
   closeModal();
-  if (_pendingApply !== null) fireApply(_pendingApply);
+  if (idx !== null) fireApply(idx);
 }
 
 async function fireApply(i) {
