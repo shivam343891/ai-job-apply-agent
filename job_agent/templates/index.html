@@ -7,6 +7,22 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     [x-cloak] { display: none !important; }
+    .fit-tooltip {
+      position: fixed;
+      z-index: 9999;
+      background: #1e293b;
+      border: 1px solid #334155;
+      color: #cbd5e1;
+      font-size: 0.72rem;
+      line-height: 1.4;
+      padding: 6px 10px;
+      border-radius: 6px;
+      max-width: 280px;
+      pointer-events: none;
+      white-space: pre-wrap;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+      display: none;
+    }
   </style>
 </head>
 <body class="bg-gray-950 text-gray-100 min-h-screen font-mono">
@@ -154,6 +170,7 @@
       <div><span class="text-gray-500">URL: </span><span id="modal-url" class="break-all"></span></div>
       <div><span class="text-gray-500">Source: </span><span id="modal-source"></span></div>
       <div><span class="text-gray-500">ATS Match: </span><span id="modal-score"></span></div>
+      <div id="modal-fit-reason-row" class="hidden"><span class="text-gray-500">Fit reason: </span><span id="modal-fit-reason" class="text-gray-300"></span></div>
     </div>
     <div class="flex gap-3 justify-end">
       <button onclick="closeModal()" class="text-sm px-4 py-2 rounded border border-gray-600 hover:bg-gray-800 transition">
@@ -170,6 +187,7 @@
 <!-- TOAST                                                                -->
 <!-- ════════════════════════════════════════════════════════════════════ -->
 <div id="toast" class="hidden fixed bottom-5 right-5 bg-gray-800 border border-gray-700 text-sm text-gray-100 px-4 py-3 rounded-lg shadow-xl max-w-xs z-50"></div>
+<div id="fit-tooltip" class="fit-tooltip"></div>
 
 <!-- ════════════════════════════════════════════════════════════════════ -->
 <!-- JAVASCRIPT                                                           -->
@@ -312,7 +330,7 @@ function renderJobs(jobs) {
           <p class="text-xs text-gray-400 mt-0.5">${esc(job.company || '')}${job.location ? ' · ' + esc(job.location) : ''}</p>
         </div>
         <div class="flex items-center gap-2 shrink-0">
-          ${rating ? `<span class="text-xs px-2 py-0.5 rounded-full font-medium ${ratingClass(rating)}">${rating}${score !== null ? ' · ' + score : ''}</span>` : ''}
+          ${rating ? `<span class="text-xs px-2 py-0.5 rounded-full font-medium ${ratingClass(rating)} cursor-help" data-fit-reason="${esc(job.fit?.reason || '')}">${rating}${score !== null ? ' · ' + score : ''}</span>` : ''}
           ${url ? `<a href="${esc(url)}" target="_blank" class="text-xs text-indigo-400 hover:underline">View ↗</a>` : ''}
         </div>
       </div>
@@ -462,6 +480,14 @@ function triggerApply(i) {
     document.getElementById('modal-url').textContent       = url || '—';
     document.getElementById('modal-source').textContent    = job.site || job.source || '—';
     document.getElementById('modal-score').textContent     = job.fit ? `${job.fit.rating} (${job.fit.score})` : '—';
+    const fitReasonRow = document.getElementById('modal-fit-reason-row');
+    const fitReasonEl  = document.getElementById('modal-fit-reason');
+    if (job.fit?.reason) {
+      fitReasonEl.textContent = job.fit.reason;
+      fitReasonRow.classList.remove('hidden');
+    } else {
+      fitReasonRow.classList.add('hidden');
+    }
     document.getElementById('modal-overlay').classList.remove('hidden');
   } else {
     fireApply(i);
@@ -612,6 +638,41 @@ setInterval(() => {
 function esc(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
+
+// ── Fit-reason tooltip ─────────────────────────────────────────────────
+(function() {
+  const tip = document.getElementById('fit-tooltip');
+  const OFFSET = 12;
+
+  document.addEventListener('mouseover', function(e) {
+    const el = e.target.closest('[data-fit-reason]');
+    if (!el) return;
+    const reason = el.getAttribute('data-fit-reason');
+    if (!reason) return;
+    tip.textContent = reason;
+    tip.style.display = 'block';
+    positionTip(e);
+  });
+
+  document.addEventListener('mousemove', function(e) {
+    if (tip.style.display === 'block') positionTip(e);
+  });
+
+  document.addEventListener('mouseout', function(e) {
+    const el = e.target.closest('[data-fit-reason]');
+    if (el) tip.style.display = 'none';
+  });
+
+  function positionTip(e) {
+    const vw = window.innerWidth, vh = window.innerHeight;
+    let x = e.clientX + OFFSET, y = e.clientY + OFFSET;
+    // keep within viewport
+    if (x + 290 > vw) x = e.clientX - 290 - OFFSET;
+    if (y + 80  > vh) y = e.clientY - 80  - OFFSET;
+    tip.style.left = x + 'px';
+    tip.style.top  = y + 'px';
+  }
+})();
 </script>
 </body>
 </html>

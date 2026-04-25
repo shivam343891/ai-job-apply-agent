@@ -35,7 +35,12 @@ def score_job(job_text: str, prefs: Preferences) -> dict:
     # Stage 1: dealbreakers
     for db in prefs.dealbreakers:
         if _contains(job_text, db):
-            return {"rating": "Skip", "score": 0, "triggered_dealbreaker": db}
+            return {
+                "rating": "Skip",
+                "score": 0,
+                "triggered_dealbreaker": db,
+                "reason": f'Skipped — dealbreaker matched: "{db}"',
+            }
 
     # Stage 2: must-haves
     must_met = sum(1 for m in prefs.must_haves if _contains(job_text, m))
@@ -59,6 +64,15 @@ def score_job(job_text: str, prefs: Preferences) -> dict:
     else:
         rating = "Skip"
 
+    must_missing = [m for m in prefs.must_haves if not _contains(job_text, m)]
+    nice_missing = [n for n in prefs.nice_to_haves if not _contains(job_text, n)]
+
+    reason_parts = [f"Must-haves: {must_met}/{must_total}", f"Nice-to-haves: {nice_met}/{nice_total}"]
+    if must_missing:
+        reason_parts.append(f"Missing must-haves: {', '.join(must_missing[:5])}")
+    if rating == "Skip":
+        reason_parts.insert(0, f"Skipped — score {round(composite, 3)} below threshold (0.2)")
+
     return {
         "rating": rating,
         "score": round(composite, 3),
@@ -66,4 +80,5 @@ def score_job(job_text: str, prefs: Preferences) -> dict:
         "must_haves_total": must_total,
         "nice_to_haves_met": nice_met,
         "nice_to_haves_total": nice_total,
+        "reason": " · ".join(reason_parts),
     }
