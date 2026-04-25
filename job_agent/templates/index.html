@@ -459,6 +459,7 @@ function applyEndpoint(job) {
 
 function isSupported(job) {
   const url = (job.job_url || job.link || '').toLowerCase();
+  if (url.includes('linkedin')) return !!job.is_easy_apply;
   return SUPPORTED_ATS.some(ats => url.includes(ats));
 }
 

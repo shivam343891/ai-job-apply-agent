@@ -65,9 +65,19 @@ Edit `my_config.json` with your personal details. Key fields:
 
 ---
 
-## 5. Log in to LinkedIn in Chrome
+## 5. Export LinkedIn cookies
 
-LinkedIn Easy Apply requires you to be logged in. The agent reads your Chrome cookies automatically — no manual export needed. Just make sure you are logged in to LinkedIn in your Chrome browser before running the agent.
+LinkedIn Easy Apply requires your session cookies. The agent does **not** read them automatically — you need to export them once using the Cookie-Editor Chrome extension.
+
+1. Install the [Cookie-Editor](https://cookie-editor.com/) extension in Chrome
+2. Go to [linkedin.com](https://www.linkedin.com) and make sure you are logged in
+3. Click the Cookie-Editor extension icon → **Export** → **Export as JSON**
+4. Save the file to:
+   ```
+   job_agent/linkedin_cookies.json
+   ```
+
+That file is read every time you click **Auto Apply** on a LinkedIn job. Re-export it if you get logged out or if apply starts failing with auth errors.
 
 ---
 

@@ -28,9 +28,19 @@ def get_linkedin_cookies(cache_path: str | None = None) -> list[dict]:
 
     raw = json.loads(cache.read_text())
 
+    _SAME_SITE_MAP = {
+        "no_restriction": "None",
+        "lax": "Lax",
+        "strict": "Strict",
+        "none": "None",
+    }
+
     # Cookie-Editor exports a list; normalize to Playwright format
     cookies = []
     for c in raw:
+        raw_ss = (c.get("sameSite") or "").lower()
+        same_site = _SAME_SITE_MAP.get(raw_ss, "None")
+
         cookie = {
             "name": c.get("name", ""),
             "value": c.get("value", ""),
@@ -38,7 +48,7 @@ def get_linkedin_cookies(cache_path: str | None = None) -> list[dict]:
             "path": c.get("path", "/"),
             "secure": c.get("secure", True),
             "httpOnly": c.get("httpOnly", False),
-            "sameSite": c.get("sameSite", "None"),
+            "sameSite": same_site,
         }
         if c.get("expirationDate"):
             cookie["expires"] = int(c["expirationDate"])

@@ -1,0 +1,15 @@
+[
+  {
+    "domain": ".linkedin.com",
+    "expirationDate": 1800000000,
+    "hostOnly": false,
+    "httpOnly": false,
+    "name": "li_at",
+    "path": "/",
+    "sameSite": "no_restriction",
+    "secure": true,
+    "session": false,
+    "storeId": null,
+    "value": "YOUR_LI_AT_VALUE_HERE"
+  }
+]

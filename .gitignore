@@ -144,6 +144,7 @@ celerybeat.pid
 job_agent/config.json
 job_agent/config/answer_bank.md
 job_agent/preferences.json
+job_agent/linkedin_cookies.json
 *.csv
 token.pkl
 env/

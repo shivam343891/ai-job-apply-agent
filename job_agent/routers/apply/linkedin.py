@@ -33,10 +33,24 @@ async def _playwright_apply(job_id: str, req: LinkedInApplyRequest):
     await load_linkedin_cookies(ctx)
 
     page = await ctx.new_page()
-    await page.goto(req.job_url, wait_until="networkidle")
+    await page.goto(req.job_url, wait_until="domcontentloaded", timeout=60000)
+    # Wait for the job detail panel to render before looking for the apply button
+    try:
+        await page.wait_for_selector(".jobs-unified-top-card, .job-view-layout", timeout=15000)
+    except Exception:
+        pass  # proceed anyway; button search will fail gracefully below
     events.append({"stage": "navigate", "url": req.job_url})
 
-    easy_apply = await page.query_selector("button.jobs-apply-button")
+    easy_apply = None
+    for selector in [
+        "button.jobs-apply-button",
+        "button[data-job-id]",
+        "button:has-text('Easy Apply')",
+        ".jobs-apply-button",
+    ]:
+        easy_apply = await page.query_selector(selector)
+        if easy_apply:
+            break
     if not easy_apply:
         await browser.close()
         return {"success": False, "reason": "easy_apply_button_not_found", "events": events}
