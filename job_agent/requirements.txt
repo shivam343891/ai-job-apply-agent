@@ -12,4 +12,5 @@ browser-cookie3>=0.19.1
 google-auth>=2.35.0
 google-auth-oauthlib>=1.2.1
 google-api-python-client>=2.149.0
+nltk>=3.9.0
 code-review-graph==2.2.1

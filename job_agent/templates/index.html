@@ -66,7 +66,7 @@
       </div>
       <div>
         <label class="text-xs text-gray-400 mb-1 block">Results per region</label>
-        <input id="s-count" type="number" value="10" min="1" max="50"
+        <input id="s-count" type="number" value="10" min="1"
           class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-indigo-500" />
       </div>
       <div>
@@ -74,12 +74,33 @@
         <input id="s-hours" type="number" value="72" min="1"
           class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-indigo-500" />
       </div>
-      <div>
-        <label class="text-xs text-gray-400 mb-1 block">Sites</label>
-        <input id="s-sites" type="text" value="linkedin,indeed,zip_recruiter"
-          class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-indigo-500" />
+    </div>
+
+    <!-- Sites multi-select -->
+    <div class="mb-4">
+      <div class="flex items-center justify-between mb-1.5">
+        <label class="text-xs text-gray-400">Sites</label>
+        <div class="flex gap-3 text-xs text-indigo-400">
+          <button type="button" onclick="toggleAllSites(true)">all</button>
+          <button type="button" onclick="toggleAllSites(false)">none</button>
+        </div>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <label class="flex items-center gap-1.5 cursor-pointer select-none bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded px-2.5 py-1 text-xs transition">
+          <input type="checkbox" class="site-cb accent-indigo-500" value="linkedin" checked /> LinkedIn
+        </label>
+        <label class="flex items-center gap-1.5 cursor-pointer select-none bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded px-2.5 py-1 text-xs transition">
+          <input type="checkbox" class="site-cb accent-indigo-500" value="indeed" checked /> Indeed
+        </label>
+        <label class="flex items-center gap-1.5 cursor-pointer select-none bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded px-2.5 py-1 text-xs transition">
+          <input type="checkbox" class="site-cb accent-indigo-500" value="glassdoor" /> Glassdoor
+        </label>
+        <label class="flex items-center gap-1.5 cursor-pointer select-none bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded px-2.5 py-1 text-xs transition">
+          <input type="checkbox" class="site-cb accent-indigo-500" value="zip_recruiter" checked /> ZipRecruiter
+        </label>
       </div>
     </div>
+
     <!-- Regions checklist -->
     <div class="mb-4">
       <div class="flex items-center justify-between mb-1.5">
@@ -93,6 +114,31 @@
         <span class="text-xs text-gray-600 animate-pulse">Loading regions…</span>
       </div>
     </div>
+
+    <!-- Synonyms panel -->
+    <div class="mb-4 border border-gray-800 rounded-lg p-3">
+      <div class="flex items-center justify-between mb-2">
+        <div class="flex items-center gap-2">
+          <label class="relative inline-flex items-center cursor-pointer">
+            <input type="checkbox" id="synonyms-toggle" class="sr-only peer" onchange="onSynonymsToggle()" />
+            <div class="w-8 h-4 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-4 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-indigo-600"></div>
+          </label>
+          <span class="text-xs text-gray-400">Use synonyms / PNCs</span>
+        </div>
+        <button id="synonyms-gen-btn" onclick="generateSynonyms()" disabled
+          class="text-xs px-2.5 py-1 rounded border border-gray-700 text-gray-500 cursor-not-allowed transition"
+          title="Enable synonyms first">
+          Generate synonyms ↻
+        </button>
+      </div>
+      <div id="synonyms-panel" class="hidden">
+        <p class="text-xs text-gray-500 mb-2">Pick terms to search. Each checked term becomes a separate query (deduped in results).</p>
+        <div id="synonyms-terms" class="flex flex-wrap gap-2 min-h-[28px]">
+          <span class="text-xs text-gray-600">Click "Generate synonyms" to load suggestions.</span>
+        </div>
+      </div>
+    </div>
+
     <button onclick="startSearch()"
       class="bg-indigo-600 hover:bg-indigo-500 text-white text-sm px-5 py-2 rounded transition font-semibold">
       Search
@@ -257,39 +303,124 @@ function selectedRegions() {
   return [...document.querySelectorAll('.region-cb:checked')].map(cb => cb.value);
 }
 
+function selectedSites() {
+  return [...document.querySelectorAll('.site-cb:checked')].map(cb => cb.value);
+}
+function toggleAllSites(checked) {
+  document.querySelectorAll('.site-cb').forEach(cb => cb.checked = checked);
+}
+
+function onSynonymsToggle() {
+  const on = document.getElementById('synonyms-toggle').checked;
+  const btn = document.getElementById('synonyms-gen-btn');
+  const panel = document.getElementById('synonyms-panel');
+  btn.disabled = !on;
+  btn.className = on
+    ? 'text-xs px-2.5 py-1 rounded border border-indigo-600 text-indigo-400 hover:bg-indigo-900/40 transition'
+    : 'text-xs px-2.5 py-1 rounded border border-gray-700 text-gray-500 cursor-not-allowed transition';
+  if (!on) panel.classList.add('hidden');
+  else panel.classList.remove('hidden');
+}
+
+async function generateSynonyms() {
+  const term = document.getElementById('s-term').value.trim();
+  if (!term) { toast('Enter a search term first', true); return; }
+  const btn = document.getElementById('synonyms-gen-btn');
+  const box = document.getElementById('synonyms-terms');
+  btn.textContent = 'Loading…';
+  btn.disabled = true;
+  try {
+    const r = await fetch('/jobs/synonyms', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ search_term: term })
+    });
+    const d = await r.json();
+    if (d.error) { toast(d.error, true); return; }
+
+    // Build chip list: original term first (always checked), then per-word synonyms
+    const words = Object.keys(d.words);
+    let html = `<label class="flex items-center gap-1.5 cursor-pointer select-none bg-indigo-900/40 border border-indigo-700 rounded px-2.5 py-1 text-xs">
+      <input type="checkbox" class="syn-cb accent-indigo-500" value="${esc(term)}" checked />${esc(term)} <span class="text-gray-500">(original)</span></label>`;
+
+    // PNCs of words (pairs, triples, etc.)
+    const combos = [];
+    for (let size = words.length; size >= 1; size--) {
+      for (let i = 0; i <= words.length - size; i++) {
+        const combo = words.slice(i, i + size).join(' ');
+        if (combo !== term) combos.push(combo);
+      }
+    }
+    combos.forEach(c => {
+      html += `<label class="flex items-center gap-1.5 cursor-pointer select-none bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded px-2.5 py-1 text-xs transition">
+        <input type="checkbox" class="syn-cb accent-indigo-500" value="${esc(c)}" />${esc(c)}</label>`;
+    });
+
+    // Synonyms per word
+    words.forEach(word => {
+      (d.words[word] || []).forEach(syn => {
+        html += `<label class="flex items-center gap-1.5 cursor-pointer select-none bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded px-2.5 py-1 text-xs transition">
+          <input type="checkbox" class="syn-cb accent-indigo-500" value="${esc(syn)}" />${esc(syn)} <span class="text-gray-600">(${esc(word)})</span></label>`;
+      });
+    });
+
+    box.innerHTML = html;
+  } catch(e) {
+    toast('Failed to generate synonyms: ' + e, true);
+  } finally {
+    btn.textContent = 'Generate synonyms ↻';
+    btn.disabled = false;
+  }
+}
+
+function selectedSearchTerms() {
+  const useSynonyms = document.getElementById('synonyms-toggle').checked;
+  if (useSynonyms) {
+    const checked = [...document.querySelectorAll('.syn-cb:checked')].map(cb => cb.value);
+    return checked.length ? checked : null;
+  }
+  return null;
+}
+
 async function startSearch() {
   const term    = document.getElementById('s-term').value.trim();
   const count   = parseInt(document.getElementById('s-count').value) || 10;
   const hours   = parseInt(document.getElementById('s-hours').value) || 72;
-  const sites   = document.getElementById('s-sites').value.split(',').map(s=>s.trim()).filter(Boolean);
+  const sites   = selectedSites();
   const regions = selectedRegions();
+  const extraTerms = selectedSearchTerms(); // null = synonyms off
 
   if (!term) { toast('Enter a search term', true); return; }
+  if (!sites.length) { toast('Select at least one site', true); return; }
   if (!regions.length) { toast('Select at least one region', true); return; }
 
   document.getElementById('results-list').innerHTML = '';
   const prog = document.getElementById('search-progress');
   prog.classList.remove('hidden');
-  setProgress(0, `Starting search across ${regions.length} region${regions.length > 1 ? 's' : ''}…`);
+  const termCount = extraTerms ? extraTerms.length : 1;
+  setProgress(0, `Starting search — ${termCount} term${termCount > 1 ? 's' : ''} × ${regions.length} region${regions.length > 1 ? 's' : ''}…`);
+
+  const body = {
+    search_term: term,
+    results_per_region: count,
+    hours_old: hours,
+    site_names: sites,
+    regions,
+    preferences_path: CFG.preferencesPath,
+  };
+  if (extraTerms) body.search_terms = extraTerms;
 
   const res = await fetch('/jobs/search', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      search_term: term,
-      results_per_region: count,
-      hours_old: hours,
-      site_names: sites,
-      regions,
-      preferences_path: CFG.preferencesPath,
-    })
+    body: JSON.stringify(body)
   });
   const { job_id } = await res.json();
 
   pollJob(job_id,
     (pct, status) => setProgress(pct, status === 'running' ? 'Scraping…' : status),
     (result) => {
-      setProgress(100, `Found ${result.count} jobs across ${result.regions_scraped} region${result.regions_scraped !== 1 ? 's' : ''}`);
+      const t = result.terms_searched || 1;
+      setProgress(100, `Found ${result.count} jobs · ${t} term${t > 1 ? 's' : ''} · ${result.regions_scraped} region${result.regions_scraped !== 1 ? 's' : ''}`);
       renderJobs(result.jobs || []);
     },
     (err) => { toast('Search failed: ' + err, true); prog.classList.add('hidden'); }

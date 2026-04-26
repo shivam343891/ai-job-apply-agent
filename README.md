@@ -5,7 +5,9 @@ An AI-powered job application agent that automates the end-to-end job search and
 ## Features
 
 ### Job Discovery
-- Search job boards across configurable regions
+- Search job boards across configurable regions in parallel
+- **Multi-term search with PNCs** — optionally expand a search term into all sub-phrase combinations (e.g. "Backend Engineer Python" → "Backend Engineer", "Backend Python", "Engineer Python", etc.) and run each as a separate query, deduped in results
+- **Synonym expansion** — toggle on to generate WordNet synonyms per word; pick and choose which to include before searching
 - Scrape company careers pages directly
 - AI-powered job fit scoring against your preferences and resume
 
@@ -66,13 +68,19 @@ job_agent/
 ## Setup
 
 ### Prerequisites
-- Python 3.11+
+- Python 3.12 (jobspy requires 3.12; not 3.13/3.14)
 - Google Chrome (for cookie extraction and CDP automation)
 - Playwright browsers installed
 
 ```bash
-pip install -e .
+pip install -r job_agent/requirements.txt
 playwright install chromium
+```
+
+`nltk` WordNet data is downloaded automatically on first use of the `/jobs/synonyms` endpoint. To pre-download manually:
+
+```python
+import nltk; nltk.download("wordnet"); nltk.download("omw-1.4")
 ```
 
 ### Configuration
@@ -108,7 +116,8 @@ Open `http://127.0.0.1:8000` in your browser.
 |--------|------|-------------|
 | GET | `/` | Web UI |
 | GET | `/health` | Health check |
-| POST | `/jobs/search` | Search job boards |
+| POST | `/jobs/search` | Search job boards (supports `search_terms` list for PNC/synonym multi-query) |
+| POST | `/jobs/synonyms` | Generate WordNet synonyms for each word in a search term |
 | POST | `/jobs/score` | Score a job against preferences |
 | POST | `/jobs/careers` | Scrape a company careers page |
 | POST | `/resume/tailor` | Tailor resume to a JD |

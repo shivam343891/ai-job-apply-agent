@@ -4,7 +4,7 @@ Layer 1 – Job Discovery
   POST /jobs/score    → synchronous fit scoring of provided job text
   POST /jobs/careers  → async company careers page scan via Playwright
 
-Search strategy for Shivam:
+Search strategy:
   - India: all locations, any work mode
   - US/Europe: remote only OR on-site with sponsorship flag in posting
   - Language filter: English-language postings only (LinkedIn/Indeed handle this)
@@ -44,11 +44,16 @@ _SPONSORSHIP_SIGNALS = re.compile(
 
 class SearchRequest(BaseModel):
     search_term: str
-    results_per_region: int = 15    # scraped per region; total ≈ regions × this
+    search_terms: list[str] = []    # if set, overrides search_term; each is a separate jobspy query
+    results_per_region: int = 15    # scraped per region per search term
     hours_old: int = 72
     site_names: list[str] = ["linkedin", "indeed", "glassdoor", "zip_recruiter"]
     preferences_path: str = ""      # if set, each job gets a fit score
     regions: list[str] = []         # location names to include; empty = all regions
+
+
+class SynonymRequest(BaseModel):
+    search_term: str
 
 
 class ScoreRequest(BaseModel):
@@ -113,34 +118,35 @@ async def _scrape_region(search_term: str, hours_old: int, site_names: list, res
 async def _scrape(job_id: str, req: SearchRequest):
     prefs = load_preferences(req.preferences_path) if req.preferences_path else None
 
+    # Resolve which terms to search — explicit list takes priority over single term
+    terms = req.search_terms if req.search_terms else [req.search_term]
+
     # Filter to requested regions (empty list = all)
     active_regions = (
         [r for r in _REGIONS if r["location"] in req.regions]
         if req.regions else _REGIONS
-    ) or _REGIONS  # fallback to all if none matched
+    ) or _REGIONS
 
-    # Scrape all regions concurrently
+    # Scrape all (term × region) combinations concurrently
     job_store.update_job(job_id, status="running", progress=5)
     tasks = [
-        _scrape_region(
-            req.search_term, req.hours_old, req.site_names,
-            req.results_per_region, region
-        )
+        _scrape_region(term, req.hours_old, req.site_names, req.results_per_region, region)
+        for term in terms
         for region in active_regions
     ]
-    results_per_region = await asyncio.gather(*tasks, return_exceptions=True)
+    all_batches = await asyncio.gather(*tasks, return_exceptions=True)
 
-    # Merge and deduplicate by job_url
-    seen_urls: set[str] = set()
+    # Merge and deduplicate across all terms and regions
+    seen_keys: set[str] = set()
     merged: list[dict] = []
-    for batch in results_per_region:
+    for batch in all_batches:
         if isinstance(batch, Exception):
             continue
         for job in batch:
             url = str(job.get("job_url", ""))
             key = url or f"{job.get('company','')}|{job.get('title','')}|{job.get('location','')}"
-            if key not in seen_urls:
-                seen_urls.add(key)
+            if key not in seen_keys:
+                seen_keys.add(key)
                 if prefs:
                     text = f"{job.get('title','')} {job.get('description','')} {job.get('location','')}"
                     job["fit"] = score_job(text, prefs)
@@ -151,7 +157,7 @@ async def _scrape(job_id: str, req: SearchRequest):
     merged.sort(key=lambda j: order.get(j.get("fit", {}).get("rating", ""), 2))
 
     job_store.update_job(job_id, progress=100)
-    return {"count": len(merged), "regions_scraped": len(active_regions), "jobs": merged}
+    return {"count": len(merged), "regions_scraped": len(active_regions), "terms_searched": len(terms), "jobs": merged}
 
 
 async def _scrape_careers(job_id: str, req: CareersRequest):
@@ -199,6 +205,33 @@ async def search_jobs(req: SearchRequest, background_tasks: BackgroundTasks):
     job_id = job_store.create_job()
     background_tasks.add_task(job_store.run_background, job_id, _scrape(job_id, req))
     return {"job_id": job_id, "status": "pending"}
+
+
+@router.post("/synonyms")
+async def get_synonyms(req: SynonymRequest):
+    """Return WordNet synonyms for each word in the search term so the UI can let the user pick."""
+    try:
+        import nltk  # type: ignore
+        from nltk.corpus import wordnet  # type: ignore
+        try:
+            wordnet.synsets("test")
+        except LookupError:
+            nltk.download("wordnet", quiet=True)
+            nltk.download("omw-1.4", quiet=True)
+    except ImportError:
+        return {"error": "nltk not installed. Run: pip install nltk", "words": {}}
+
+    words = req.search_term.split()
+    result: dict[str, list[str]] = {}
+    for word in words:
+        syns: set[str] = set()
+        for synset in wordnet.synsets(word):
+            for lemma in synset.lemmas():
+                name = lemma.name().replace("_", " ")
+                if name.lower() != word.lower():
+                    syns.add(name)
+        result[word] = sorted(syns)[:15]  # cap per word to keep UI manageable
+    return {"words": result}
 
 
 @router.post("/score")
